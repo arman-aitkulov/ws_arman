@@ -2,23 +2,39 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8" />
-<title>Workshop App</title>
+<title>Мой вишлист</title>
 <style>
-  body { font-family: system-ui, sans-serif; max-width: 480px; margin: 40px auto; }
-  input { padding: 8px; margin-right: 8px; }
-  button { padding: 8px 12px; }
-  li { margin: 8px 0; }
+  body { font-family: system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; color: #222; }
+  h1 { margin-bottom: 4px; }
+  .hint { color: #666; font-size: 14px; margin-top: 0; }
+  form { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0; padding: 16px; background: #f6f6f6; border-radius: 8px; }
+  input { padding: 8px; border: 1px solid #ccc; border-radius: 4px; flex: 1 1 160px; }
+  button { padding: 8px 14px; border: none; border-radius: 4px; background: #333; color: white; cursor: pointer; }
+  button:hover { background: #555; }
+  form button { flex: 1 1 100%; }
+  ul { list-style: none; padding: 0; }
+  li { border: 1px solid #e0e0e0; border-radius: 8px; padding: 14px; margin: 10px 0; }
+  li.booked { background: #f9f9f9; opacity: 0.75; }
+  .item-name { font-weight: 600; font-size: 16px; }
+  .item-price { color: #666; margin-left: 6px; }
+  .item-comment { color: #555; font-size: 14px; margin: 4px 0; }
+  .item-link { display: inline-block; margin: 6px 0; font-size: 14px; }
+  .booked-tag { color: #b45309; font-size: 14px; font-weight: 600; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+  .row input { flex: 1 1 140px; }
 </style>
 </head>
 <body>
-  <h1>Workshop App</h1>
-  <p>Это заготовка. Claude заменит это на приложение под вашу идею —
-  здесь только базовый пример, чтобы показать, что подключение к базе
-  данных работает.</p>
+  <h1>🎁 Мой вишлист</h1>
+  <p class="hint">Добавляйте подарки, которые хотите получить. Друзья могут бронировать их, чтобы не дарить одно и то же.</p>
 
-  <input id="name" placeholder="название" />
-  <input id="note" placeholder="заметка (необязательно)" />
-  <button onclick="addItem()">Добавить</button>
+  <form onsubmit="addItem(event)">
+    <input id="name" placeholder="Название подарка" required />
+    <input id="link" placeholder="Ссылка на товар" />
+    <input id="price" placeholder="Цена (необязательно)" />
+    <input id="comment" placeholder="Комментарий (цвет, размер...)" />
+    <button type="submit">Добавить подарок</button>
+  </form>
 
   <ul id="list"></ul>
 
@@ -28,11 +44,7 @@
   const SUPABASE_URL = "https://ospzdrbiwlwvmrfjokee.supabase.co";
   const SUPABASE_KEY = "sb_publishable_IiTOhk0_H-y5KzC3qhRiBg_UMgFRnz8";
 
-  // IMPORTANT: Claude — generate a short random ID (e.g. 6 characters,
-  // letters+numbers) ONCE and hardcode it here. This keeps this
-  // participant's data separate from everyone else sharing the same
-  // Supabase project. Do not leave this as "REPLACE_ME".
-  const PARTICIPANT_ID = "REPLACE_ME";
+  const PARTICIPANT_ID = "eovaq7";
 
   const client = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
@@ -41,6 +53,7 @@
       .from("workshop_data")
       .select("*")
       .eq("participant_id", PARTICIPANT_ID)
+      .eq("item_type", "gift")
       .order("created_at", { ascending: false });
 
     if (error) {
@@ -50,22 +63,55 @@
 
     const list = document.getElementById("list");
     list.innerHTML = "";
+
     for (const row of data) {
+      const g = row.data;
       const li = document.createElement("li");
-      li.textContent = `${row.data.name}${row.data.note ? " — " + row.data.note : ""}`;
+      if (g.booked_by) li.classList.add("booked");
+
+      const linkHtml = g.link
+        ? `<br/><a class="item-link" href="${escapeAttr(g.link)}" target="_blank" rel="noopener">Посмотреть товар →</a>`
+        : "";
+      const priceHtml = g.price ? `<span class="item-price">— ${escapeHtml(g.price)}</span>` : "";
+      const commentHtml = g.comment ? `<div class="item-comment">${escapeHtml(g.comment)}</div>` : "";
+
+      let actionHtml;
+      if (g.booked_by) {
+        actionHtml = `
+          <div class="row">
+            <span class="booked-tag">Забронировано: ${escapeHtml(g.booked_by)}</span>
+            <button onclick="cancelBooking('${row.id}')">Отменить бронь</button>
+          </div>`;
+      } else {
+        actionHtml = `
+          <div class="row">
+            <input id="booker-${row.id}" placeholder="Ваше имя" />
+            <button onclick="bookItem('${row.id}')">Забронировать</button>
+          </div>`;
+      }
+
+      li.innerHTML = `
+        <span class="item-name">${escapeHtml(g.name)}</span>${priceHtml}
+        ${commentHtml}
+        ${linkHtml}
+        ${actionHtml}
+      `;
       list.appendChild(li);
     }
   }
 
-  async function addItem() {
-    const name = document.getElementById("name").value;
-    const note = document.getElementById("note").value;
+  async function addItem(event) {
+    event.preventDefault();
+    const name = document.getElementById("name").value.trim();
+    const link = document.getElementById("link").value.trim();
+    const price = document.getElementById("price").value.trim();
+    const comment = document.getElementById("comment").value.trim();
     if (!name) return;
 
     const { error } = await client.from("workshop_data").insert({
       participant_id: PARTICIPANT_ID,
-      item_type: "item",
-      data: { name, note },
+      item_type: "gift",
+      data: { name, link, price, comment, booked_by: null },
     });
 
     if (error) {
@@ -74,8 +120,77 @@
     }
 
     document.getElementById("name").value = "";
-    document.getElementById("note").value = "";
+    document.getElementById("link").value = "";
+    document.getElementById("price").value = "";
+    document.getElementById("comment").value = "";
     loadItems();
+  }
+
+  async function bookItem(id) {
+    const input = document.getElementById(`booker-${id}`);
+    const bookerName = input.value.trim();
+    if (!bookerName) {
+      input.focus();
+      return;
+    }
+
+    const { data: rows, error: fetchError } = await client
+      .from("workshop_data")
+      .select("data")
+      .eq("id", id)
+      .single();
+
+    if (fetchError) {
+      console.error(fetchError);
+      return;
+    }
+
+    const { error } = await client
+      .from("workshop_data")
+      .update({ data: { ...rows.data, booked_by: bookerName } })
+      .eq("id", id);
+
+    if (error) {
+      console.error(error);
+      return;
+    }
+
+    loadItems();
+  }
+
+  async function cancelBooking(id) {
+    const { data: rows, error: fetchError } = await client
+      .from("workshop_data")
+      .select("data")
+      .eq("id", id)
+      .single();
+
+    if (fetchError) {
+      console.error(fetchError);
+      return;
+    }
+
+    const { error } = await client
+      .from("workshop_data")
+      .update({ data: { ...rows.data, booked_by: null } })
+      .eq("id", id);
+
+    if (error) {
+      console.error(error);
+      return;
+    }
+
+    loadItems();
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement("div");
+    div.textContent = str ?? "";
+    return div.innerHTML;
+  }
+
+  function escapeAttr(str) {
+    return escapeHtml(str).replaceAll('"', "&quot;");
   }
 
   loadItems();
