@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8" />
-<title>Мой вишлист</title>
+<title>Вишлист подарков</title>
 <style>
   body { font-family: system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; color: #222; }
   h1 { margin-bottom: 4px; }
@@ -22,21 +22,44 @@
   .booked-tag { color: #b45309; font-size: 14px; font-weight: 600; }
   .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
   .row input { flex: 1 1 140px; }
+  .share-box { background: #eef6ff; border: 1px solid #cfe4fb; border-radius: 8px; padding: 12px; margin: 16px 0; font-size: 14px; }
+  .share-box input { width: 100%; margin-top: 6px; box-sizing: border-box; background: white; }
+  .footer-link { margin-top: 32px; font-size: 14px; }
+  .footer-link a { color: #555; }
 </style>
 </head>
 <body>
-  <h1>🎁 Мой вишлист</h1>
-  <p class="hint">Добавляйте подарки, которые хотите получить. Друзья могут бронировать их, чтобы не дарить одно и то же.</p>
 
-  <form onsubmit="addItem(event)">
-    <input id="name" placeholder="Название подарка" required />
-    <input id="link" placeholder="Ссылка на товар" />
-    <input id="price" placeholder="Цена (необязательно)" />
-    <input id="comment" placeholder="Комментарий (цвет, размер...)" />
-    <button type="submit">Добавить подарок</button>
-  </form>
+  <div id="home" hidden>
+    <h1>🎁 Вишлист подарков</h1>
+    <p class="hint">Создайте свой список подарков и поделитесь ссылкой с друзьями — они смогут бронировать подарки, чтобы не дарить одно и то же.</p>
+    <form onsubmit="createList(event)">
+      <input id="owner-name" placeholder="Ваше имя" required />
+      <button type="submit">Создать свой список</button>
+    </form>
+  </div>
 
-  <ul id="list"></ul>
+  <div id="app" hidden>
+    <h1 id="app-title">🎁 Вишлист</h1>
+    <p class="hint">Список подарков. Забронируйте подарок, чтобы друзья знали, что он уже занят.</p>
+
+    <div id="share-box" class="share-box" hidden>
+      Поделитесь этой ссылкой с друзьями, чтобы они могли бронировать подарки:
+      <input id="share-link" readonly onclick="this.select()" />
+    </div>
+
+    <form id="add-form" onsubmit="addItem(event)" hidden>
+      <input id="name" placeholder="Название подарка" required />
+      <input id="link" placeholder="Ссылка на товар" />
+      <input id="price" placeholder="Цена (необязательно)" />
+      <input id="comment" placeholder="Комментарий (цвет, размер...)" />
+      <button type="submit">Добавить подарок</button>
+    </form>
+
+    <ul id="list"></ul>
+
+    <p class="footer-link"><a href="index.html">Создать свой список подарков →</a></p>
+  </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
@@ -48,12 +71,82 @@
 
   const client = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
+  const LIST_ID = new URLSearchParams(location.search).get("list");
+  const MY_LIST_KEY = "myWishlistId";
+
+  async function init() {
+    if (!LIST_ID) {
+      const savedListId = localStorage.getItem(MY_LIST_KEY);
+      if (savedListId) {
+        location.href = `?list=${savedListId}`;
+        return;
+      }
+      document.getElementById("home").hidden = false;
+      return;
+    }
+
+    const isOwner = localStorage.getItem(MY_LIST_KEY) === LIST_ID;
+    document.getElementById("app").hidden = false;
+
+    if (isOwner) {
+      document.getElementById("add-form").hidden = false;
+      const shareBox = document.getElementById("share-box");
+      shareBox.hidden = false;
+      document.getElementById("share-link").value = location.href;
+    }
+
+    await loadListTitle();
+    await loadItems();
+  }
+
+  async function createList(event) {
+    event.preventDefault();
+    const ownerName = document.getElementById("owner-name").value.trim();
+    if (!ownerName) return;
+
+    const listId = Math.random().toString(36).slice(2, 8);
+
+    const { error } = await client.from("workshop_data").insert({
+      participant_id: PARTICIPANT_ID,
+      item_type: "list_meta",
+      data: { list_id: listId, owner_name: ownerName },
+    });
+
+    if (error) {
+      console.error(error);
+      return;
+    }
+
+    localStorage.setItem(MY_LIST_KEY, listId);
+    location.href = `?list=${listId}`;
+  }
+
+  async function loadListTitle() {
+    const { data, error } = await client
+      .from("workshop_data")
+      .select("data")
+      .eq("participant_id", PARTICIPANT_ID)
+      .eq("item_type", "list_meta")
+      .eq("data->>list_id", LIST_ID)
+      .maybeSingle();
+
+    if (error) {
+      console.error(error);
+      return;
+    }
+
+    if (data) {
+      document.getElementById("app-title").textContent = `🎁 Вишлист: ${data.data.owner_name}`;
+    }
+  }
+
   async function loadItems() {
     const { data, error } = await client
       .from("workshop_data")
       .select("*")
       .eq("participant_id", PARTICIPANT_ID)
       .eq("item_type", "gift")
+      .eq("data->>list_id", LIST_ID)
       .order("created_at", { ascending: false });
 
     if (error) {
@@ -111,7 +204,7 @@
     const { error } = await client.from("workshop_data").insert({
       participant_id: PARTICIPANT_ID,
       item_type: "gift",
-      data: { name, link, price, comment, booked_by: null },
+      data: { list_id: LIST_ID, name, link, price, comment, booked_by: null },
     });
 
     if (error) {
@@ -193,7 +286,7 @@
     return escapeHtml(str).replaceAll('"', "&quot;");
   }
 
-  loadItems();
+  init();
 </script>
 </body>
 </html>
