@@ -35,8 +35,10 @@
     <p class="hint">Создайте свой список подарков и поделитесь ссылкой с друзьями — они смогут бронировать подарки, чтобы не дарить одно и то же.</p>
     <form onsubmit="createList(event)">
       <input id="owner-name" placeholder="Ваше имя" required />
+      <input id="owner-password" type="password" placeholder="Пароль (чтобы входить с других устройств)" required />
       <button type="submit">Создать свой список</button>
     </form>
+    <p class="hint">Ссылка на список сохранится в этом браузере автоматически. Пароль нужен, только если захотите зайти в свой список с другого устройства.</p>
   </div>
 
   <div id="app" hidden>
@@ -46,6 +48,14 @@
     <div id="share-box" class="share-box" hidden>
       Поделитесь этой ссылкой с друзьями, чтобы они могли бронировать подарки:
       <input id="share-link" readonly onclick="this.select()" />
+    </div>
+
+    <div id="login-box" hidden>
+      <button onclick="toggleLoginForm()">Это ваш список? Войти</button>
+      <form id="login-form" onsubmit="login(event)" hidden>
+        <input id="login-password" type="password" placeholder="Пароль" required />
+        <button type="submit">Войти</button>
+      </form>
     </div>
 
     <form id="add-form" onsubmit="addItem(event)" hidden>
@@ -73,6 +83,8 @@
 
   const LIST_ID = new URLSearchParams(location.search).get("list");
   const MY_LIST_KEY = "myWishlistId";
+  let LIST_META = null;
+  let isOwner = false;
 
   async function init() {
     if (!LIST_ID) {
@@ -85,31 +97,36 @@
       return;
     }
 
-    const isOwner = localStorage.getItem(MY_LIST_KEY) === LIST_ID;
     document.getElementById("app").hidden = false;
+    await loadListTitle();
+    applyOwnerState();
+    await loadItems();
+  }
+
+  function applyOwnerState() {
+    isOwner = localStorage.getItem(MY_LIST_KEY) === LIST_ID;
+
+    document.getElementById("add-form").hidden = !isOwner;
+    document.getElementById("share-box").hidden = !isOwner;
+    document.getElementById("login-box").hidden = isOwner;
 
     if (isOwner) {
-      document.getElementById("add-form").hidden = false;
-      const shareBox = document.getElementById("share-box");
-      shareBox.hidden = false;
       document.getElementById("share-link").value = location.href;
     }
-
-    await loadListTitle();
-    await loadItems();
   }
 
   async function createList(event) {
     event.preventDefault();
     const ownerName = document.getElementById("owner-name").value.trim();
-    if (!ownerName) return;
+    const password = document.getElementById("owner-password").value;
+    if (!ownerName || !password) return;
 
     const listId = Math.random().toString(36).slice(2, 8);
 
     const { error } = await client.from("workshop_data").insert({
       participant_id: PARTICIPANT_ID,
       item_type: "list_meta",
-      data: { list_id: listId, owner_name: ownerName },
+      data: { list_id: listId, owner_name: ownerName, password },
     });
 
     if (error) {
@@ -136,8 +153,28 @@
     }
 
     if (data) {
+      LIST_META = data.data;
       document.getElementById("app-title").textContent = `🎁 Вишлист: ${data.data.owner_name}`;
     }
+  }
+
+  function toggleLoginForm() {
+    const form = document.getElementById("login-form");
+    form.hidden = !form.hidden;
+  }
+
+  function login(event) {
+    event.preventDefault();
+    const password = document.getElementById("login-password").value;
+
+    if (!LIST_META || password !== LIST_META.password) {
+      alert("Неверный пароль");
+      return;
+    }
+
+    localStorage.setItem(MY_LIST_KEY, LIST_ID);
+    applyOwnerState();
+    loadItems();
   }
 
   async function loadItems() {
