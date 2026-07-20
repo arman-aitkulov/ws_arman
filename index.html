@@ -11,6 +11,7 @@
   input { padding: 8px; border: 1px solid #ccc; border-radius: 4px; flex: 1 1 160px; }
   button { padding: 8px 14px; border: none; border-radius: 4px; background: #333; color: white; cursor: pointer; }
   button:hover { background: #555; }
+  button.link-btn { background: none; color: #2563eb; padding: 0; text-decoration: underline; }
   form button { flex: 1 1 100%; }
   ul { list-style: none; padding: 0; }
   li { border: 1px solid #e0e0e0; border-radius: 8px; padding: 14px; margin: 10px 0; }
@@ -26,36 +27,49 @@
   .share-box input { width: 100%; margin-top: 6px; box-sizing: border-box; background: white; }
   .footer-link { margin-top: 32px; font-size: 14px; }
   .footer-link a { color: #555; }
+  .auth-status { font-size: 14px; color: #555; margin-bottom: 16px; }
+  .tabs { display: flex; gap: 16px; margin-bottom: 8px; }
+  .tabs button { background: none; color: #666; padding: 4px 0; border-bottom: 2px solid transparent; }
+  .tabs button.active { color: #222; border-bottom-color: #333; font-weight: 600; }
+  .auth-note { font-size: 13px; color: #666; }
 </style>
 </head>
 <body>
 
   <div id="home" hidden>
     <h1>🎁 Вишлист подарков</h1>
-    <p class="hint">Создайте свой список подарков и поделитесь ссылкой с друзьями — они смогут бронировать подарки, чтобы не дарить одно и то же.</p>
-    <form onsubmit="createList(event)">
-      <input id="owner-name" placeholder="Ваше имя" required />
-      <input id="owner-password" type="password" placeholder="Пароль (чтобы входить с других устройств)" required />
-      <button type="submit">Создать свой список</button>
+    <p class="hint">Войдите или зарегистрируйтесь, чтобы создать свой список подарков и поделиться ссылкой с друзьями.</p>
+
+    <div class="tabs">
+      <button id="tab-login" class="active" onclick="switchTab('login')">Вход</button>
+      <button id="tab-signup" onclick="switchTab('signup')">Регистрация</button>
+    </div>
+
+    <form id="login-form" onsubmit="handleLogin(event)">
+      <input id="login-email" type="email" placeholder="Email" required />
+      <input id="login-password" type="password" placeholder="Пароль" required />
+      <button type="submit">Войти</button>
     </form>
-    <p class="hint">Ссылка на список сохранится в этом браузере автоматически. Пароль нужен, только если захотите зайти в свой список с другого устройства.</p>
+
+    <form id="signup-form" onsubmit="handleSignup(event)" hidden>
+      <input id="signup-name" placeholder="Ваше имя" required />
+      <input id="signup-email" type="email" placeholder="Email" required />
+      <input id="signup-password" type="password" placeholder="Пароль (мин. 6 символов)" required minlength="6" />
+      <button type="submit">Зарегистрироваться</button>
+    </form>
+
+    <p id="auth-message" class="auth-note"></p>
   </div>
 
   <div id="app" hidden>
+    <p id="auth-status" class="auth-status"></p>
+
     <h1 id="app-title">🎁 Вишлист</h1>
     <p class="hint">Список подарков. Забронируйте подарок, чтобы друзья знали, что он уже занят.</p>
 
     <div id="share-box" class="share-box" hidden>
       Поделитесь этой ссылкой с друзьями, чтобы они могли бронировать подарки:
       <input id="share-link" readonly onclick="this.select()" />
-    </div>
-
-    <div id="login-box" hidden>
-      <button onclick="toggleLoginForm()">Это ваш список? Войти</button>
-      <form id="login-form" onsubmit="login(event)" hidden>
-        <input id="login-password" type="password" placeholder="Пароль" required />
-        <button type="submit">Войти</button>
-      </form>
     </div>
 
     <form id="add-form" onsubmit="addItem(event)" hidden>
@@ -68,7 +82,7 @@
 
     <ul id="list"></ul>
 
-    <p class="footer-link"><a href="index.html">Создать свой список подарков →</a></p>
+    <p class="footer-link"><a href="index.html">На главную →</a></p>
   </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -82,60 +96,142 @@
   const client = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
   const LIST_ID = new URLSearchParams(location.search).get("list");
-  const MY_LIST_KEY = "myWishlistId";
-  let LIST_META = null;
+  let session = null;
   let isOwner = false;
 
   async function init() {
+    const { data } = await client.auth.getSession();
+    session = data.session;
+
+    client.auth.onAuthStateChange((_event, newSession) => {
+      session = newSession;
+      render();
+    });
+
+    render();
+  }
+
+  function switchTab(tab) {
+    document.getElementById("tab-login").classList.toggle("active", tab === "login");
+    document.getElementById("tab-signup").classList.toggle("active", tab === "signup");
+    document.getElementById("login-form").hidden = tab !== "login";
+    document.getElementById("signup-form").hidden = tab !== "signup";
+    document.getElementById("auth-message").textContent = "";
+  }
+
+  async function handleSignup(event) {
+    event.preventDefault();
+    const name = document.getElementById("signup-name").value.trim();
+    const email = document.getElementById("signup-email").value.trim();
+    const password = document.getElementById("signup-password").value;
+
+    const { data, error } = await client.auth.signUp({
+      email,
+      password,
+      options: {
+        data: { display_name: name },
+        emailRedirectTo: location.origin + location.pathname,
+      },
+    });
+
+    const msg = document.getElementById("auth-message");
+    if (error) {
+      msg.textContent = "Ошибка регистрации: " + error.message;
+      return;
+    }
+
+    if (data.session) {
+      // Email confirmation is off for this project — logged in right away.
+      session = data.session;
+      await ensureListMeta();
+      location.href = `?list=${session.user.id}`;
+    } else {
+      msg.textContent = `Письмо для подтверждения отправлено на ${email}. Перейдите по ссылке в письме, потом войдите на вкладке «Вход».`;
+    }
+  }
+
+  async function handleLogin(event) {
+    event.preventDefault();
+    const email = document.getElementById("login-email").value.trim();
+    const password = document.getElementById("login-password").value;
+
+    const { data, error } = await client.auth.signInWithPassword({ email, password });
+
+    const msg = document.getElementById("auth-message");
+    if (error) {
+      msg.textContent = "Ошибка входа: " + error.message;
+      return;
+    }
+
+    session = data.session;
+    await ensureListMeta();
+    location.href = `?list=${session.user.id}`;
+  }
+
+  async function logout() {
+    await client.auth.signOut();
+    location.href = "index.html";
+  }
+
+  async function ensureListMeta() {
+    if (!session) return;
+    const ownerId = session.user.id;
+
+    const { data: existing } = await client
+      .from("workshop_data")
+      .select("id")
+      .eq("participant_id", PARTICIPANT_ID)
+      .eq("item_type", "list_meta")
+      .eq("data->>owner_id", ownerId)
+      .maybeSingle();
+
+    if (!existing) {
+      const ownerName = session.user.user_metadata?.display_name || session.user.email;
+      await client.from("workshop_data").insert({
+        participant_id: PARTICIPANT_ID,
+        item_type: "list_meta",
+        data: { owner_id: ownerId, owner_name: ownerName },
+      });
+    }
+  }
+
+  function updateAuthStatusBar() {
+    const bar = document.getElementById("auth-status");
+    if (session) {
+      const myLink = `?list=${session.user.id}`;
+      const goHome = LIST_ID === session.user.id
+        ? ""
+        : ` · <a href="${myLink}">Мой список</a>`;
+      bar.innerHTML = `Вы вошли как ${escapeHtml(session.user.email)}${goHome} · <button class="link-btn" onclick="logout()">Выйти</button>`;
+    } else {
+      bar.innerHTML = `<a href="index.html">Войти в свой аккаунт</a>`;
+    }
+  }
+
+  function render() {
     if (!LIST_ID) {
-      const savedListId = localStorage.getItem(MY_LIST_KEY);
-      if (savedListId) {
-        location.href = `?list=${savedListId}`;
+      if (session) {
+        location.href = `?list=${session.user.id}`;
         return;
       }
       document.getElementById("home").hidden = false;
+      document.getElementById("app").hidden = true;
       return;
     }
 
+    document.getElementById("home").hidden = true;
     document.getElementById("app").hidden = false;
-    await loadListTitle();
-    applyOwnerState();
-    await loadItems();
-  }
 
-  function applyOwnerState() {
-    isOwner = localStorage.getItem(MY_LIST_KEY) === LIST_ID;
-
+    isOwner = !!session && session.user.id === LIST_ID;
     document.getElementById("add-form").hidden = !isOwner;
     document.getElementById("share-box").hidden = !isOwner;
-    document.getElementById("login-box").hidden = isOwner;
-
     if (isOwner) {
       document.getElementById("share-link").value = location.href;
     }
-  }
 
-  async function createList(event) {
-    event.preventDefault();
-    const ownerName = document.getElementById("owner-name").value.trim();
-    const password = document.getElementById("owner-password").value;
-    if (!ownerName || !password) return;
-
-    const listId = Math.random().toString(36).slice(2, 8);
-
-    const { error } = await client.from("workshop_data").insert({
-      participant_id: PARTICIPANT_ID,
-      item_type: "list_meta",
-      data: { list_id: listId, owner_name: ownerName, password },
-    });
-
-    if (error) {
-      console.error(error);
-      return;
-    }
-
-    localStorage.setItem(MY_LIST_KEY, listId);
-    location.href = `?list=${listId}`;
+    updateAuthStatusBar();
+    loadListTitle();
+    loadItems();
   }
 
   async function loadListTitle() {
@@ -144,7 +240,7 @@
       .select("data")
       .eq("participant_id", PARTICIPANT_ID)
       .eq("item_type", "list_meta")
-      .eq("data->>list_id", LIST_ID)
+      .eq("data->>owner_id", LIST_ID)
       .maybeSingle();
 
     if (error) {
@@ -153,28 +249,8 @@
     }
 
     if (data) {
-      LIST_META = data.data;
       document.getElementById("app-title").textContent = `🎁 Вишлист: ${data.data.owner_name}`;
     }
-  }
-
-  function toggleLoginForm() {
-    const form = document.getElementById("login-form");
-    form.hidden = !form.hidden;
-  }
-
-  function login(event) {
-    event.preventDefault();
-    const password = document.getElementById("login-password").value;
-
-    if (!LIST_META || password !== LIST_META.password) {
-      alert("Неверный пароль");
-      return;
-    }
-
-    localStorage.setItem(MY_LIST_KEY, LIST_ID);
-    applyOwnerState();
-    loadItems();
   }
 
   async function loadItems() {
@@ -183,7 +259,7 @@
       .select("*")
       .eq("participant_id", PARTICIPANT_ID)
       .eq("item_type", "gift")
-      .eq("data->>list_id", LIST_ID)
+      .eq("data->>owner_id", LIST_ID)
       .order("created_at", { ascending: false });
 
     if (error) {
@@ -241,7 +317,7 @@
     const { error } = await client.from("workshop_data").insert({
       participant_id: PARTICIPANT_ID,
       item_type: "gift",
-      data: { list_id: LIST_ID, name, link, price, comment, booked_by: null },
+      data: { owner_id: LIST_ID, name, link, price, comment, booked_by: null },
     });
 
     if (error) {
