@@ -113,9 +113,11 @@
   async function init() {
     const { data } = await client.auth.getSession();
     session = data.session;
+    if (session) await ensureListMeta();
 
-    client.auth.onAuthStateChange((_event, newSession) => {
+    client.auth.onAuthStateChange(async (_event, newSession) => {
       session = newSession;
+      if (session) await ensureListMeta();
       render();
     });
 
