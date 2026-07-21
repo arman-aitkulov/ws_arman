@@ -59,6 +59,15 @@
     </form>
 
     <p id="auth-message" class="auth-note"></p>
+
+    <p class="footer-link"><a href="?browse=1">Посмотреть все списки участников →</a></p>
+  </div>
+
+  <div id="browse" hidden>
+    <h1>🎁 Все вишлисты</h1>
+    <p class="hint">Список участников, которые уже создали свой вишлист.</p>
+    <ul id="browse-list"></ul>
+    <p class="footer-link"><a href="index.html">На главную →</a></p>
   </div>
 
   <div id="app" hidden>
@@ -82,7 +91,7 @@
 
     <ul id="list"></ul>
 
-    <p class="footer-link"><a href="index.html">На главную →</a></p>
+    <p class="footer-link"><a href="?browse=1">Все списки участников</a> · <a href="index.html">На главную →</a></p>
   </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -95,7 +104,9 @@
 
   const client = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-  const LIST_ID = new URLSearchParams(location.search).get("list");
+  const params = new URLSearchParams(location.search);
+  const LIST_ID = params.get("list");
+  const BROWSE = params.get("browse") === "1";
   let session = null;
   let isOwner = false;
 
@@ -209,6 +220,14 @@
   }
 
   function render() {
+    if (BROWSE) {
+      document.getElementById("home").hidden = true;
+      document.getElementById("app").hidden = true;
+      document.getElementById("browse").hidden = false;
+      loadAllLists();
+      return;
+    }
+
     if (!LIST_ID) {
       if (session) {
         location.href = `?list=${session.user.id}`;
@@ -216,10 +235,12 @@
       }
       document.getElementById("home").hidden = false;
       document.getElementById("app").hidden = true;
+      document.getElementById("browse").hidden = true;
       return;
     }
 
     document.getElementById("home").hidden = true;
+    document.getElementById("browse").hidden = true;
     document.getElementById("app").hidden = false;
 
     isOwner = !!session && session.user.id === LIST_ID;
@@ -250,6 +271,34 @@
 
     if (data) {
       document.getElementById("app-title").textContent = `🎁 Вишлист: ${data.data.owner_name}`;
+    }
+  }
+
+  async function loadAllLists() {
+    const { data, error } = await client
+      .from("workshop_data")
+      .select("data")
+      .eq("participant_id", PARTICIPANT_ID)
+      .eq("item_type", "list_meta")
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error(error);
+      return;
+    }
+
+    const listEl = document.getElementById("browse-list");
+    listEl.innerHTML = "";
+
+    if (data.length === 0) {
+      listEl.innerHTML = "<li>Пока никто не создал свой список.</li>";
+      return;
+    }
+
+    for (const row of data) {
+      const li = document.createElement("li");
+      li.innerHTML = `<a href="?list=${encodeURIComponent(row.data.owner_id)}">${escapeHtml(row.data.owner_name)}</a>`;
+      listEl.appendChild(li);
     }
   }
 
